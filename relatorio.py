@@ -35,7 +35,7 @@ if not st.session_state.logado:
     st.stop()
 
 # =========================
-# CONFIG TEMPLATE
+# TEMPLATE
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PATH = os.path.join(BASE_DIR, "modelo.docx")
@@ -158,9 +158,9 @@ if st.button("🚀 Gerar Relatório"):
     texto_ilustrativo = f"Manutenção em {local}"
 
     # =========================
-    # SUBSTITUIÇÃO
+    # SUBSTITUIÇÃO SEGURA
     # =========================
-    for i, p in enumerate(doc.paragraphs):
+    for p in doc.paragraphs:
 
         if "RELATÓRIO DE SEGURANÇA" in p.text:
             p.text = f"RELATÓRIO DE SEGURANÇA Nr. {numero} / 2026"
@@ -171,45 +171,34 @@ if st.button("🚀 Gerar Relatório"):
         elif "ASSUNTO:" in p.text:
             p.text = f"ASSUNTO: {assunto.upper()}"
 
-        elif "Clique ou toque aqui" in p.text:
-            anterior = doc.paragraphs[i-1].text if i > 0 else ""
+        elif "{{INFORMATIVA}}" in p.text:
+            p.text = texto_informativo
 
-            if "INFORMATIVA" in anterior:
-                p.text = texto_informativo
-            elif "ILUSTRATIVA" in anterior:
-                p.text = texto_ilustrativo
-            elif "CONCLUSIVA" in anterior:
-                p.text = texto_conclusivo
-            else:
-                p.text = ""
+        elif "{{ILUSTRATIVA}}" in p.text:
+            p.text = texto_ilustrativo
+
+        elif "{{CONCLUSIVA}}" in p.text:
+            p.text = texto_conclusivo
 
     # =========================
-    # FOTO + LEGENDA (CORRIGIDO)
+    # FOTO + LEGENDA
     # =========================
     if foto_bytes:
         for i, p in enumerate(doc.paragraphs):
             if "PARTE ILUSTRATIVA" in p.text:
                 try:
                     # Nome da imagem
-                    p_titulo = doc.paragraphs[i+1]
-                    p_titulo.text = nome_foto
-                    p_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doc.paragraphs[i+1].text = nome_foto
+                    doc.paragraphs[i+1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                    # Imagem (largura total da página)
-                    p_img = doc.paragraphs[i+2]
-                    run = p_img.add_run()
+                    # Imagem
+                    run = doc.paragraphs[i+2].add_run()
+                    run.add_picture(io.BytesIO(foto_bytes), width=Cm(16))
+                    doc.paragraphs[i+2].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                    run.add_picture(
-                        io.BytesIO(foto_bytes),
-                        width=Cm(16)
-                    )
-
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-                    # Legenda logo abaixo
-                    p_legenda = doc.paragraphs[i+3]
-                    p_legenda.text = f"Figura 1 – {nome_foto}"
-                    p_legenda.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    # Legenda
+                    doc.paragraphs[i+3].text = f"Figura 1 – {nome_foto}"
+                    doc.paragraphs[i+3].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
                 except Exception as e:
                     st.error(f"Erro na imagem: {e}")
