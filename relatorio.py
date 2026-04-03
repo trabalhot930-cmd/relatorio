@@ -1,4 +1,5 @@
 import streamlit as st
+from PIL import Image as PILImage
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -270,61 +271,21 @@ if st.button("🚀 Gerar Relatório"):
     # 4) FOTO — cabe na primeira página, ajustada ao espaço disponível
     # --------------------------------------------------
     if foto_bytes:
-        from PIL import Image as PILImage
-
-        # Dimensões da página e margens (em cm)
-        page_h_cm   = doc.sections[0].page_height.cm
-        margin_top  = doc.sections[0].top_margin.cm
-        margin_bot  = doc.sections[0].bottom_margin.cm
-        page_w_cm   = doc.sections[0].page_width.cm
-        margin_left = doc.sections[0].left_margin.cm
-        margin_right= doc.sections[0].right_margin.cm
-
-        # Espaço útil
-        useful_h = page_h_cm - margin_top - margin_bot
-        useful_w = page_w_cm - margin_left - margin_right
-
-        # Espaço estimado consumido antes da imagem (tabela + textos + títulos)
-        espaco_antes = 12.0   # cm — ajuste fino se necessário
-        max_h = useful_h - espaco_antes  # altura máxima disponível para a imagem
-
-        # Proporção real da imagem
-        img = PILImage.open(io.BytesIO(foto_bytes))
-        img_w_px, img_h_px = img.size
-        proporcao = img_h_px / img_w_px
-
-        # Calcula largura que respeita a altura máxima e a largura útil
-        largura_pela_altura = max_h / proporcao  # largura se limitarmos pela altura
-        largura_final = min(largura_pela_altura, useful_w)   # nunca ultrapassa a página
-        altura_final  = largura_final * proporcao
-
-        # Garante pelo menos 5cm de altura
-        if altura_final < 5:
-            largura_final = useful_w
-            altura_final  = largura_final * proporcao
-
         for i, p in enumerate(doc.paragraphs):
             if 'PARTE ILUSTRATIVA' in full_text(p):
                 try:
                     # i+1 = caption (nome da imagem, já preenchido acima)
                     # i+2 = parágrafo para a foto
-                    # i+3 a i+6 = parágrafos vazios — limpar espaçamento extra
                     p_foto = doc.paragraphs[i + 2]
                     p_foto.clear()
                     run = p_foto.add_run()
+                    # Tamanho fixo definido pelo cliente: 6,8cm largura x 12,09cm altura
                     run.add_picture(
                         io.BytesIO(foto_bytes),
-                        width=Cm(largura_final),
-                        height=Cm(altura_final)
+                        width=Cm(6.8),
+                        height=Cm(12.09)
                     )
                     p_foto.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-                    # Remove espaçamento extra dos parágrafos vazios após a foto
-                    from docx.shared import Pt
-                    for j in range(i + 3, min(i + 8, len(doc.paragraphs))):
-                        pf = doc.paragraphs[j].paragraph_format
-                        pf.space_before = Pt(0)
-                        pf.space_after  = Pt(0)
 
                 except Exception as e:
                     st.error(f"Erro ao inserir imagem: {e}")
