@@ -1,6 +1,6 @@
 import streamlit as st
 from docx import Document
-from docx.shared import Cm
+from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 import io
@@ -34,7 +34,7 @@ if not st.session_state.logado:
     st.stop()
 
 # =========================
-# CONFIG TEMPLATE
+# CONFIG
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PATH = os.path.join(BASE_DIR, "modelo.docx")
@@ -48,102 +48,116 @@ MESES = {
 # FUNÇÕES AUXILIARES
 # =========================
 def full_text(p):
-    """Lê o texto completo de um parágrafo, mesmo com múltiplos runs."""
     return "".join(r.text for r in p.runs)
 
 def substituir_paragrafo(p, novo_texto):
-    """
-    Substitui o texto de um parágrafo preservando a formatação (fonte, bold, etc.)
-    do primeiro run. Funciona mesmo que o texto esteja dividido em vários runs.
-    """
+    """Substitui texto preservando formatação do primeiro run."""
     if not p.runs:
         return
-
     ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-    primeiro_run = p.runs[0]._r
-    rPr = primeiro_run.find(f'{{{ns}}}rPr')
+    rPr = p.runs[0]._r.find(f'{{{ns}}}rPr')
     rPr_copia = copy.deepcopy(rPr) if rPr is not None else None
 
-    # Remove todos os runs existentes
     for run in list(p.runs):
         run._r.getparent().remove(run._r)
 
-    # Cria novo run com o texto novo
     novo_run = p.add_run(novo_texto)
     if rPr_copia is not None:
         novo_run._r.insert(0, rPr_copia)
 
-def inserir_bloco_texto(p_ref, linhas):
+def substituir_bloco(doc, p_inicio_idx, p_fim_idx, linhas):
     """
-    Substitui um parágrafo marcador (ex: {{INFORMATIVA}}) por múltiplos
-    parágrafos — um por linha do texto.
+    Remove parágrafos de p_inicio_idx até p_fim_idx (inclusive)
+    e insere novos parágrafos com as linhas fornecidas.
     """
+    paragrafos = doc.paragraphs
+    p_ref = paragrafos[p_inicio_idx]
     parent = p_ref._element.getparent()
-    idx = list(parent).index(p_ref._element)
-    parent.remove(p_ref._element)
+    idx_insert = list(parent).index(p_ref._element)
 
+    ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    rPr_ref = None
+    if p_ref.runs:
+        rPr_ref = p_ref.runs[0]._r.find(f'{{{ns}}}rPr')
+
+    # Remove parágrafos do bloco (de trás para frente)
+    for i in range(p_fim_idx, p_inicio_idx - 1, -1):
+        elem = doc.paragraphs[i]._element
+        elem.getparent().remove(elem)
+
+    # Insere novos parágrafos
     for i, linha in enumerate(linhas):
         novo_p = OxmlElement('w:p')
+        pPr = OxmlElement('w:pPr')
+        pStyle = OxmlElement('w:pStyle')
+        pStyle.set(f'{{{ns}}}val', 'ListParagraph')
+        pPr.append(pStyle)
+        novo_p.append(pPr)
+
         r = OxmlElement('w:r')
+        if rPr_ref is not None:
+            r.append(copy.deepcopy(rPr_ref))
         t = OxmlElement('w:t')
         t.text = linha
         t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
         r.append(t)
         novo_p.append(r)
-        parent.insert(idx + i, novo_p)
+        parent.insert(idx_insert + i, novo_p)
 
 # =========================
 # INTERFACE
 # =========================
 st.title("📄 Relatório Norte Energia")
+st.success(f"👷 Técnico logado: {st.session_state.usuario}")
 
-tecnico = st.session_state.usuario
-st.success(f"👷 Técnico logado: {tecnico}")
-
-numero    = st.text_input("Número do Relatório", "1")
-assunto   = st.text_input("Assunto", "MANUTENÇÃO RADAR CANAL DE FUGA")
+numero     = st.text_input("Número do Relatório", placeholder="Ex: 1")
+assunto    = st.text_input("Assunto", placeholder="Ex: MANUTENÇÃO RADAR CANAL DE FUGA")
 data_manut = st.date_input("Data", value=date.today())
-local     = st.text_input("Localidade", "Canal de Fuga")
+local      = st.text_input("Localidade", placeholder="Ex: Canal de Fuga")
 
 # =========================
-# PARTE INFORMATIVA
+# PARTE INFORMATIVA (editável)
 # =========================
 st.subheader("📝 Parte Informativa")
-
 texto_informativo = st.text_area(
-    "Editar se necessário:",
-    f"""Manutenção Radar canal de fuga
-
-A equipe de Meios Eletrônicos, sob a Superintendência de Segurança Corporativa, executou na data de {data_manut.day} de {MESES[data_manut.month].lower()} a manutenção do sistema radar da localidade canal de fuga.
-
-Foram executadas as atividades de:
-• Testes
-• Religamento (equipamento estava congelado)
-""",
+    "Escreva o texto informativo:",
+    placeholder=(
+        "Manutenção Radar canal de fuga\n"
+        "\n"
+        "A equipe de Meios Eletrônicos, sob a Superintendência de Segurança Corporativa, "
+        "executou na data de DD de mês de AAAA a manutenção do sistema radar da localidade [local].\n"
+        "\n"
+        "Foram executadas as atividades de:\n"
+        "• Descreva a atividade 1\n"
+        "• Descreva a atividade 2"
+    ),
     height=250
 )
 
 # =========================
-# IMAGEM
+# PARTE ILUSTRATIVA (editável)
 # =========================
-st.subheader("🖼️ Identificação da Imagem")
-nome_foto = st.text_input("Descrição da imagem:", "Radar Canal de Fuga após manutenção")
+st.subheader("🖼️ Parte Ilustrativa")
+texto_ilustrativo = st.text_area(
+    "Escreva o texto ilustrativo:",
+    placeholder="Ex: Manutenção Canal de Fuga",
+    height=80
+)
 
 # =========================
-# PARTE CONCLUSIVA
+# PARTE CONCLUSIVA (editável)
 # =========================
 st.subheader("📌 Parte Conclusiva")
 texto_conclusivo = st.text_area(
-    "Editar conclusão:",
-    "Após as manutenções os equipamentos foram recolocados em operação.",
-    height=150
+    "Escreva o texto conclusivo:",
+    placeholder="Ex: Após as manutenções os equipamentos foram recolocados em operação.",
+    height=120
 )
 
 # =========================
 # GPS
 # =========================
 st.subheader("📍 Localização automática")
-
 gps_html = """
 <script>
 navigator.geolocation.getCurrentPosition(
@@ -185,15 +199,27 @@ if st.button("🚀 Gerar Relatório"):
         st.error("❌ modelo.docx não encontrado!")
         st.stop()
 
+    # Validação dos campos obrigatórios
+    erros = []
+    if not numero.strip():            erros.append("Número do Relatório")
+    if not assunto.strip():           erros.append("Assunto")
+    if not local.strip():             erros.append("Localidade")
+    if not texto_informativo.strip(): erros.append("Parte Informativa")
+    if not texto_ilustrativo.strip(): erros.append("Parte Ilustrativa")
+    if not texto_conclusivo.strip():  erros.append("Parte Conclusiva")
+
+    if erros:
+        st.error(f"❌ Preencha os campos obrigatórios: {', '.join(erros)}")
+        st.stop()
+
     doc = Document(TEMPLATE_PATH)
 
     data_str   = f"{data_manut.day} de {MESES[data_manut.month]} de {data_manut.year}"
     data_upper = data_str.upper()
 
-    # -----------------------------------------------
-    # 1) SUBSTITUIÇÕES NA TABELA DO CABEÇALHO
-    #    (Nr. / DATA / ASSUNTO ficam numa tabela)
-    # -----------------------------------------------
+    # --------------------------------------------------
+    # 1) CABEÇALHO — dentro da tabela
+    # --------------------------------------------------
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -206,54 +232,85 @@ if st.button("🚀 Gerar Relatório"):
                     elif "ASSUNTO:" in txt:
                         substituir_paragrafo(p, f"ASSUNTO: {assunto.upper()}")
 
-    # -----------------------------------------------
-    # 2) SUBSTITUIÇÕES NOS PARÁGRAFOS DO CORPO
-    # -----------------------------------------------
-    # Fazemos snapshot da lista para não quebrar o loop
-    # quando inserir_bloco_texto alterar o XML
-    paragrafos = list(doc.paragraphs)
-
-    for p in paragrafos:
+    # --------------------------------------------------
+    # 2) PARTE INFORMATIVA
+    #    Parágrafos 3 a 7 no template original
+    # --------------------------------------------------
+    # Encontra início e fim do bloco informativo
+    idx_info_ini = None
+    idx_info_fim = None
+    for i, p in enumerate(doc.paragraphs):
         txt = full_text(p)
+        if idx_info_ini is None and txt.strip() == 'Manutenção Radar canal de fuga':
+            idx_info_ini = i
+        if idx_info_ini is not None and 'PARTE ILUSTRATIVA' in txt:
+            # O bloco termina no parágrafo vazio logo antes desta seção
+            idx_info_fim = i - 2
+            break
 
-        if "{{INFORMATIVA}}" in txt:
-            inserir_bloco_texto(p, texto_informativo.split('\n'))
+    if idx_info_ini is not None and idx_info_fim is not None and idx_info_ini <= idx_info_fim:
+        substituir_bloco(doc, idx_info_ini, idx_info_fim, texto_informativo.split('\n'))
 
-        elif "{{ILUSTRATIVA}}" in txt:
-            substituir_paragrafo(p, f"Manutenção em {local}")
+    # --------------------------------------------------
+    # 3) PARTE ILUSTRATIVA — legenda da seção (caption)
+    # --------------------------------------------------
+    for i, p in enumerate(doc.paragraphs):
+        if 'PARTE ILUSTRATIVA' in full_text(p):
+            if i + 1 < len(doc.paragraphs):
+                substituir_paragrafo(doc.paragraphs[i + 1], texto_ilustrativo)
+            break
 
-        elif "{{CONCLUSIVA}}" in txt:
-            inserir_bloco_texto(p, texto_conclusivo.split('\n'))
-
-        elif "Vitória do Xingu" in txt:
-            substituir_paragrafo(p, f"Vitória do Xingu /PA, {data_str}")
-
-    # -----------------------------------------------
-    # 3) FOTO + LEGENDA
-    # -----------------------------------------------
+    # --------------------------------------------------
+    # 4) FOTO — sem nome/legenda abaixo
+    # --------------------------------------------------
     if foto_bytes:
         for i, p in enumerate(doc.paragraphs):
-            if "PARTE ILUSTRATIVA" in full_text(p):
+            if 'PARTE ILUSTRATIVA' in full_text(p):
                 try:
-                    doc.paragraphs[i+1].clear()
-                    doc.paragraphs[i+1].add_run(nome_foto)
-                    doc.paragraphs[i+1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-                    doc.paragraphs[i+2].clear()
-                    run = doc.paragraphs[i+2].add_run()
+                    # i+1 = legenda da seção (já preenchida acima)
+                    # i+2 = parágrafo para a imagem
+                    p_foto = doc.paragraphs[i + 2]
+                    p_foto.clear()
+                    run = p_foto.add_run()
                     run.add_picture(io.BytesIO(foto_bytes), width=Cm(16))
-                    doc.paragraphs[i+2].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-                    doc.paragraphs[i+3].clear()
-                    doc.paragraphs[i+3].add_run(f"Figura 1 – {nome_foto}")
-                    doc.paragraphs[i+3].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_foto.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 except Exception as e:
                     st.error(f"Erro ao inserir imagem: {e}")
                 break
 
-    # -----------------------------------------------
-    # 4) EXPORTAR
-    # -----------------------------------------------
+    # --------------------------------------------------
+    # 5) PARTE CONCLUSIVA
+    # --------------------------------------------------
+    idx_conc_ini = None
+    idx_conc_fim = None
+    for i, p in enumerate(doc.paragraphs):
+        txt = full_text(p)
+        if 'PARTE CONCLUSIVA' in txt and idx_conc_ini is None:
+            idx_conc_ini = i + 1
+        if 'Vitória do Xingu' in txt and idx_conc_ini is not None:
+            # Acha último parágrafo não-vazio antes de Vitória do Xingu
+            for j in range(i - 1, idx_conc_ini - 1, -1):
+                if full_text(doc.paragraphs[j]).strip():
+                    idx_conc_fim = j
+                    break
+            if idx_conc_fim is None:
+                idx_conc_fim = i - 1
+            break
+
+    if idx_conc_ini is not None and idx_conc_fim is not None and idx_conc_ini <= idx_conc_fim:
+        substituir_bloco(doc, idx_conc_ini, idx_conc_fim, texto_conclusivo.split('\n'))
+
+    # --------------------------------------------------
+    # 6) DATA FINAL — Vitória do Xingu
+    # --------------------------------------------------
+    for p in doc.paragraphs:
+        if 'Vitória do Xingu' in full_text(p):
+            substituir_paragrafo(p, f"Vitória do Xingu /PA, {data_str}")
+            break
+
+    # --------------------------------------------------
+    # 7) EXPORTAR
+    # --------------------------------------------------
     buffer = io.BytesIO()
     doc.save(buffer)
 
