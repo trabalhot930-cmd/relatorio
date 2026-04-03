@@ -1,240 +1,110 @@
-import streamlit as st
-from docx import Document
-from docx.shared import Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-import io
-from datetime import date
-import os
-import urllib.parse
-import streamlit.components.v1 as components
+def gerar_relatorio(doc_path, dados):
+    from docx import Document
+    from docx.shared import Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import copy, io
 
-# =========================
-# LOGIN
-# =========================
-usuarios = ["Juan", "Bruno", "Josiel"]
-senha_padrao = "BM123"
+    doc = Document(doc_path)
 
-if "logado" not in st.session_state:
-    st.session_state.logado = False
+    def full_text(p):
+        return "".join(r.text for r in p.runs)
 
-if not st.session_state.logado:
-    st.title("🔐 Acesso Técnico")
+    def substituir_texto_paragrafo(p, novo_texto):
+        """Substitui o texto preservando a formatação do primeiro run."""
+        if not p.runs:
+            return
+        # Copia rPr do primeiro run
+        primeiro = p.runs[0]._r
+        ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        rPr = primeiro.find(f'{{{ns}}}rPr')
+        rPr_copia = copy.deepcopy(rPr) if rPr is not None else None
 
-    usuario = st.selectbox("Selecione seu nome", usuarios)
-    senha = st.text_input("Senha", type="password")
+        # Remove todos os runs
+        for run in list(p.runs):
+            run._r.getparent().remove(run._r)
 
-    if st.button("Entrar"):
-        if senha == senha_padrao:
-            st.session_state.logado = True
-            st.session_state.usuario = usuario
-            st.success("✅ Acesso liberado!")
-            st.rerun()
-        else:
-            st.error("❌ Senha incorreta")
+        # Cria novo run
+        novo_run = p.add_run(novo_texto)
+        if rPr_copia is not None:
+            novo_run._r.insert(0, rPr_copia)
 
-    st.stop()
+    def inserir_bloco_texto(p_ref, linhas):
+        """Substitui parágrafo {{TAG}} por múltiplas linhas."""
+        parent = p_ref._element.getparent()
+        idx = list(parent).index(p_ref._element)
+        # Remove o parágrafo de referência
+        parent.remove(p_ref._element)
+        # Insere novos parágrafos
+        for i, linha in enumerate(linhas):
+            novo_p = OxmlElement('w:p')
+            r = OxmlElement('w:r')
+            t = OxmlElement('w:t')
+            t.text = linha
+            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            r.append(t)
+            novo_p.append(r)
+            parent.insert(idx + i, novo_p)
 
-# =========================
-# TEMPLATE
-# =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_PATH = os.path.join(BASE_DIR, "modelo.docx")
-
-# =========================
-# MESES
-# =========================
-MESES = {
-    1:"Janeiro", 2:"Fevereiro", 3:"Março", 4:"Abril", 5:"Maio", 6:"Junho",
-    7:"Julho", 8:"Agosto", 9:"Setembro", 10:"Outubro", 11:"Novembro", 12:"Dezembro"
-}
-
-# =========================
-# INTERFACE
-# =========================
-st.title("📄 Relatório Norte Energia")
-
-tecnico = st.session_state.usuario
-st.success(f"👷 Técnico logado: {tecnico}")
-
-numero = st.text_input("Número do Relatório", "1")
-assunto = st.text_input("Assunto", "MANUTENÇÃO RADAR CANAL DE FUGA")
-data_manut = st.date_input("Data", value=date.today())
-local = st.text_input("Localidade", "Canal de Fuga")
-
-# =========================
-# PARTE INFORMATIVA
-# =========================
-st.subheader("📝 Parte Informativa")
-
-texto_informativo = st.text_area(
-    "Editar se necessário:",
-    f"""Manutenção Radar canal de fuga
-
-A equipe de Meios Eletrônicos, sob a Superintendência de Segurança Corporativa, executou na data de {data_manut.day} de {MESES[data_manut.month].lower()} a manutenção do sistema radar da localidade canal de fuga.
-
-Foram executadas as atividades de:
-• Testes
-• Religamento (equipamento estava congelado)
-""",
-    height=250
-)
-
-# =========================
-# NOME DA IMAGEM
-# =========================
-st.subheader("🖼️ Identificação da Imagem")
-
-nome_foto = st.text_input(
-    "Descrição da imagem:",
-    "Radar Canal de Fuga após manutenção"
-)
-
-# =========================
-# PARTE CONCLUSIVA
-# =========================
-st.subheader("📌 Parte Conclusiva")
-
-texto_conclusivo = st.text_area(
-    "Editar conclusão:",
-    "Após as manutenções os equipamentos foram recolocados em operação.",
-    height=150
-)
-
-# =========================
-# GPS
-# =========================
-st.subheader("📍 Localização automática")
-
-gps_html = """
-<script>
-navigator.geolocation.getCurrentPosition(
-    (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        const coords = lat + "," + lon;
-        window.parent.postMessage({type: "streamlit:setComponentValue", value: coords}, "*");
-    }
-);
-</script>
-"""
-
-coords = components.html(gps_html, height=0)
-
-if coords:
-    st.success(f"📍 GPS: {coords}")
-
-# =========================
-# FOTO
-# =========================
-st.subheader("📸 Foto da Atividade")
-
-opcao_foto = st.radio("Escolha:", ["Tirar foto", "Enviar da galeria"])
-
-foto_bytes = None
-
-if opcao_foto == "Tirar foto":
-    foto = st.camera_input("Abrir câmera")
-    if foto:
-        foto_bytes = foto.getvalue()
-else:
-    arquivo = st.file_uploader("Selecionar imagem", type=["jpg", "jpeg", "png"])
-    if arquivo:
-        foto_bytes = arquivo.read()
-
-# =========================
-# GERAR RELATÓRIO
-# =========================
-if st.button("🚀 Gerar Relatório"):
-
-    if not os.path.exists(TEMPLATE_PATH):
-        st.error("❌ modelo.docx não encontrado!")
-        st.stop()
-
-    doc = Document(TEMPLATE_PATH)
+    # Dados
+    numero = dados['numero']
+    assunto = dados['assunto']
+    data_manut = dados['data']
+    local = dados['local']
+    texto_informativo = dados['texto_informativo']
+    texto_conclusivo = dados['texto_conclusivo']
+    nome_foto = dados['nome_foto']
+    foto_bytes = dados.get('foto_bytes')
+    MESES = dados['MESES']
 
     data_str = f"{data_manut.day} de {MESES[data_manut.month]} de {data_manut.year}"
     data_upper = data_str.upper()
 
-    texto_ilustrativo = f"Manutenção em {local}"
-
-    # =========================
-    # SUBSTITUIÇÃO SEGURA
-    # =========================
     for p in doc.paragraphs:
+        txt = full_text(p)
 
-        if "RELATÓRIO DE SEGURANÇA" in p.text:
-            p.text = f"RELATÓRIO DE SEGURANÇA Nr. {numero} / 2026"
+        if "RELATÓRIO DE SEGURANÇA" in txt:
+            substituir_texto_paragrafo(p, f"RELATÓRIO DE SEGURANÇA Nr. {numero} / 2026")
 
-        elif "DATA:" in p.text:
-            p.text = f"DATA: {data_upper}"
+        elif "DATA:" in txt:
+            substituir_texto_paragrafo(p, f"DATA: {data_upper}")
 
-        elif "ASSUNTO:" in p.text:
-            p.text = f"ASSUNTO: {assunto.upper()}"
+        elif "ASSUNTO:" in txt:
+            substituir_texto_paragrafo(p, f"ASSUNTO: {assunto.upper()}")
 
-        elif "{{INFORMATIVA}}" in p.text:
-            p.text = texto_informativo
+        elif "{{INFORMATIVA}}" in txt:
+            linhas = texto_informativo.split('\n')
+            inserir_bloco_texto(p, linhas)
 
-        elif "{{ILUSTRATIVA}}" in p.text:
-            p.text = texto_ilustrativo
+        elif "{{CONCLUSIVA}}" in txt:
+            linhas = texto_conclusivo.split('\n')
+            inserir_bloco_texto(p, linhas)
 
-        elif "{{CONCLUSIVA}}" in p.text:
-            p.text = texto_conclusivo
+        elif "Vitória do Xingu" in txt:
+            substituir_texto_paragrafo(p, f"Vitória do Xingu /PA, {data_str}")
 
-    # =========================
-    # FOTO + LEGENDA
-    # =========================
+    # Foto
     if foto_bytes:
         for i, p in enumerate(doc.paragraphs):
-            if "PARTE ILUSTRATIVA" in p.text:
+            if "PARTE ILUSTRATIVA" in full_text(p):
                 try:
-                    # Nome da imagem
-                    doc.paragraphs[i+1].text = nome_foto
+                    doc.paragraphs[i+1].clear()
+                    doc.paragraphs[i+1].add_run(nome_foto)
                     doc.paragraphs[i+1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                    # Imagem
+                    doc.paragraphs[i+2].clear()
                     run = doc.paragraphs[i+2].add_run()
                     run.add_picture(io.BytesIO(foto_bytes), width=Cm(16))
                     doc.paragraphs[i+2].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                    # Legenda
-                    doc.paragraphs[i+3].text = f"Figura 1 – {nome_foto}"
+                    doc.paragraphs[i+3].clear()
+                    doc.paragraphs[i+3].add_run(f"Figura 1 – {nome_foto}")
                     doc.paragraphs[i+3].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
                 except Exception as e:
-                    st.error(f"Erro na imagem: {e}")
-
+                    print(f"Erro na imagem: {e}")
                 break
 
-    # =========================
-    # DATA FINAL
-    # =========================
-    for p in doc.paragraphs:
-        if "Vitória do Xingu" in p.text:
-            p.text = f"Vitória do Xingu /PA, {data_str}"
-
-    # =========================
-    # EXPORTAR
-    # =========================
     buffer = io.BytesIO()
     doc.save(buffer)
-
-    st.success("✅ Relatório gerado com sucesso!")
-
-    st.download_button(
-        "📥 Baixar Relatório",
-        buffer.getvalue(),
-        f"Relatorio_{numero}.docx"
-    )
-
-    # =========================
-    # WHATSAPP
-    # =========================
-    mensagem = f"""
-Relatório Nr {numero}
-Assunto: {assunto}
-Local: {local}
-"""
-
-    link = "https://wa.me/?text=" + urllib.parse.quote(mensagem)
-
-    st.markdown(f"### 📲 [Enviar via WhatsApp]({link})")
+    return buffer.getvalue()
