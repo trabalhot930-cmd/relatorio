@@ -121,15 +121,16 @@ local      = st.text_input("Localidade", placeholder="Ex: Canal de Fuga")
 st.subheader("📝 Parte Informativa")
 texto_informativo = st.text_area(
     "Escreva o texto informativo:",
-    placeholder=(
-        "Manutenção Radar canal de fuga\n"
-        "\n"
-        "A equipe de Meios Eletrônicos, sob a Superintendência de Segurança Corporativa, "
-        "executou na data de DD de mês de AAAA a manutenção do sistema radar da localidade [local].\n"
-        "\n"
-        "Foram executadas as atividades de:\n"
-        "• Descreva a atividade 1\n"
-        "• Descreva a atividade 2"
+    value=(
+        f"Manutenção Radar {local or '[local]'}\n"
+        f"\n"
+        f"A equipe de Meios Eletrônicos, sob a Superintendência de Segurança Corporativa, "
+        f"executou na data de {data_manut.day} de {MESES[data_manut.month].lower()} "
+        f"de {data_manut.year} a manutenção do sistema radar da localidade {local or '[local]'}.\n"
+        f"\n"
+        f"Foram executadas as atividades de:\n"
+        f"• Testes\n"
+        f"• Religamento (equipamento estava congelado)"
     ),
     height=250
 )
@@ -139,8 +140,8 @@ texto_informativo = st.text_area(
 # =========================
 st.subheader("🖼️ Parte Ilustrativa")
 texto_ilustrativo = st.text_area(
-    "Escreva o texto ilustrativo:",
-    placeholder="Ex: Manutenção Canal de Fuga",
+    "Nome da imagem (aparece acima da foto em azul):",
+    value=f"Manutenção {local or '[local]'}",
     height=80
 )
 
@@ -150,7 +151,7 @@ texto_ilustrativo = st.text_area(
 st.subheader("📌 Parte Conclusiva")
 texto_conclusivo = st.text_area(
     "Escreva o texto conclusivo:",
-    placeholder="Ex: Após as manutenções os equipamentos foram recolocados em operação.",
+    value="Após as manutenções os equipamentos foram recolocados em operação.",
     height=120
 )
 
@@ -252,23 +253,28 @@ if st.button("🚀 Gerar Relatório"):
         substituir_bloco(doc, idx_info_ini, idx_info_fim, texto_informativo.split('\n'))
 
     # --------------------------------------------------
-    # 3) PARTE ILUSTRATIVA — legenda da seção (caption)
+    # 3) PARTE ILUSTRATIVA — caption ACIMA da foto, azul (estilo Legenda)
     # --------------------------------------------------
     for i, p in enumerate(doc.paragraphs):
         if 'PARTE ILUSTRATIVA' in full_text(p):
             if i + 1 < len(doc.paragraphs):
-                substituir_paragrafo(doc.paragraphs[i + 1], texto_ilustrativo)
+                p_caption = doc.paragraphs[i + 1]
+                # Remove todos os runs mantendo o estilo "Legenda" (azul, bold, centralizado)
+                for run in list(p_caption.runs):
+                    run._r.getparent().remove(run._r)
+                # Adiciona novo run — a cor azul vem do estilo Legenda automaticamente
+                novo_run = p_caption.add_run(texto_ilustrativo)
             break
 
     # --------------------------------------------------
-    # 4) FOTO — sem nome/legenda abaixo
+    # 4) FOTO — inserida abaixo do caption, sem legenda extra
     # --------------------------------------------------
     if foto_bytes:
         for i, p in enumerate(doc.paragraphs):
             if 'PARTE ILUSTRATIVA' in full_text(p):
                 try:
-                    # i+1 = legenda da seção (já preenchida acima)
-                    # i+2 = parágrafo para a imagem
+                    # i+1 = caption (nome da imagem, já preenchido acima)
+                    # i+2 = parágrafo vazio reservado para a foto
                     p_foto = doc.paragraphs[i + 2]
                     p_foto.clear()
                     run = p_foto.add_run()
